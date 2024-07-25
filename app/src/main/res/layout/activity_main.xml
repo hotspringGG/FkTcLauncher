@@ -2,13 +2,17 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:id="@+id/main_view"
+    android:background="@color/black"> <!-- 背景设置为黑色 -->
 
-    <Button
-        android:id="@+id/launch_button"
+    <TextView
+        android:id="@+id/time_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/start_app"
-        android:layout_centerInParent="true"/>
-</RelativeLayout>
+        android:layout_centerInParent="true"
+        android:textSize="50sp"
+        android:textColor="@color/white" />
 
+    <!-- 其他视图元素可以放在这里 -->
+
+</RelativeLayout>
