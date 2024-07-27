@@ -1,5 +1,6 @@
 package top.requan.fktclauncher;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -48,7 +49,7 @@ public class SettingsActivity extends AppCompatActivity {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 String selectedPackage = launcherPackages.get(position);
                 saveDefaultLauncher(selectedPackage);
-                Toast.makeText(SettingsActivity.this, "默认启动器已设置", Toast.LENGTH_SHORT).show();
+                Toast.makeText(SettingsActivity.this, "默认启动器已设置:" + selectedPackage.toString(), Toast.LENGTH_SHORT).show();
                 finish();
             }
         });
@@ -57,13 +58,16 @@ public class SettingsActivity extends AppCompatActivity {
     private void loadLaunchers() {
         Intent intent = new Intent(Intent.ACTION_MAIN);
         intent.addCategory(Intent.CATEGORY_HOME);
-        List<ResolveInfo> resolveInfos = packageManager.queryIntentActivities(intent, 0);
+        @SuppressLint("QueryPermissionsNeeded") List<ResolveInfo> resolveInfos = packageManager.queryIntentActivities(intent, 0);
+        String currentPackageName = getPackageName();  // 获取当前应用的包名
 
         for (ResolveInfo resolveInfo : resolveInfos) {
             String packageName = resolveInfo.activityInfo.packageName;
-            String appName = resolveInfo.loadLabel(packageManager).toString();
-            launcherNames.add(appName);
-            launcherPackages.add(packageName);
+            if (!packageName.equals(currentPackageName)) {  // 过滤掉当前应用
+                String appName = resolveInfo.loadLabel(packageManager).toString();
+                launcherNames.add(appName);
+                launcherPackages.add(packageName);
+            }
         }
     }
 

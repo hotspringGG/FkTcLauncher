@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
@@ -31,6 +32,8 @@ public class MainActivity extends AppCompatActivity {
     private final List<Long> tapTimes = new ArrayList<>();
 
     private TextView timeTextView;
+    private TextView dateTextView;
+    //private TextView versionTextView;
     private PackageManager packageManager;
 
     @Override
@@ -39,6 +42,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         timeTextView = findViewById(R.id.time_text);
+        dateTextView = findViewById(R.id.date_text);
+        //versionTextView = findViewById(R.id.version_text);
         View mainView = findViewById(R.id.main_view);
 
         packageManager = getPackageManager();
@@ -83,7 +88,18 @@ public class MainActivity extends AppCompatActivity {
     private void updateTime() {
         long currentTimeMillis = System.currentTimeMillis();
         String timeText = DateFormat.format("HH:mm:ss", currentTimeMillis).toString();
+        String dateText = DateFormat.format("yyyy-MM-dd", currentTimeMillis).toString();
+
         timeTextView.setText(timeText);
+        dateTextView.setText(dateText);
+
+        try {
+            PackageInfo packageInfo = packageManager.getPackageInfo(getPackageName(), 0);
+            String versionText = "Version: " + packageInfo.versionName;
+            //versionTextView.setText(versionText);
+        } catch (PackageManager.NameNotFoundException e) {
+            //versionTextView.setText("Version: Unknown");
+        }
     }
 
     private void handleTap() {
@@ -118,12 +134,16 @@ public class MainActivity extends AppCompatActivity {
     private void openOriginalLauncher() {
         String defaultLauncherPackage = getDefaultLauncherPackage();
         if (defaultLauncherPackage != null) {
-            Intent intent = packageManager.getLaunchIntentForPackage(defaultLauncherPackage);
-            if (intent != null) {
-                startActivity(intent);
-            } else {
-                Toast.makeText(this, "无法找到选择的启动器", Toast.LENGTH_SHORT).show();
-            }
+//            PackageManager packageManager = getPackageManager();
+            Intent intent = new Intent();
+            intent.setPackage(defaultLauncherPackage);
+            intent.setAction(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_HOME);
+//            Toast.makeText(MainActivity.this, intent.toString(), Toast.LENGTH_SHORT).show();
+
+            // 设置 FLAG_ACTIVITY_NEW_TASK 以确保新任务启动
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
         } else {
             try {
                 Intent intent = new Intent(Intent.ACTION_MAIN);
