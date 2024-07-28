@@ -1,24 +1,40 @@
 package top.requan.fktclauncher;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.graphics.PixelFormat;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.text.format.DateFormat;
+import android.util.Log;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+
+import top.requan.fktclauncher.util.OverlayPermissionUtils;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -36,6 +52,16 @@ public class MainActivity extends AppCompatActivity {
     //private TextView versionTextView;
     private PackageManager packageManager;
 
+    // To keep track of activity's window focus
+    private boolean currentFocus;
+
+    // To keep track of activity's foreground/background status
+    private boolean isPaused;
+
+    private Handler collapseNotificationHandler;
+
+    private boolean isStatusBarDisabled = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -46,7 +72,16 @@ public class MainActivity extends AppCompatActivity {
         //versionTextView = findViewById(R.id.version_text);
         View mainView = findViewById(R.id.main_view);
 
+        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        ScreenOffReceiver screenOffReceiver = new ScreenOffReceiver();
+        registerReceiver(screenOffReceiver, filter);
+
+        Intent serviceIntent = new Intent(this, ScreenService.class);
+        startService(serviceIntent);
+
+
         packageManager = getPackageManager();
+
 
         mainView.setOnTouchListener(new View.OnTouchListener() {
             @SuppressLint("ClickableViewAccessibility")
@@ -76,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
         // Update the time every second
         handler.postDelayed(updateTimeRunnable, 0);
     }
+
 
     private final Runnable updateTimeRunnable = new Runnable() {
         @Override
@@ -159,5 +195,148 @@ public class MainActivity extends AppCompatActivity {
     private String getDefaultLauncherPackage() {
         SharedPreferences preferences = getSharedPreferences(SettingsActivity.PREFS_NAME, Context.MODE_PRIVATE);
         return preferences.getString(SettingsActivity.KEY_DEFAULT_LAUNCHER, null);
+    }
+
+
+//    @Override
+//    public void onWindowFocusChanged(boolean hasFocus) {
+//        super.onWindowFocusChanged(hasFocus);
+//        Log.d("tag", "window focus changed");
+//
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+//            collapseNow();
+//        }
+//    }
+//
+//    public void collapseNow() {
+//
+//        try {
+//            // Initialize 'collapseNotificationHandler'
+//            if (collapseNotificationHandler == null) {
+//                collapseNotificationHandler = new Handler();
+//            }
+//
+//            // Post a Runnable with some delay - currently set to 300 ms
+//            collapseNotificationHandler.postDelayed(new Runnable() {
+//
+//                @Override
+//                public void run() {
+//
+//                    // Use reflection to trigger a method from 'StatusBarManager'
+//                    @SuppressLint("WrongConstant") Object statusBarService = getSystemService("statusbar");
+//                    Class<?> statusBarManager = null;
+//
+//                    try {
+//                        statusBarManager = Class.forName("android.app.StatusBarManager");
+//                    } catch (ClassNotFoundException e) {
+//                        e.printStackTrace();
+//                    }
+//
+//                    Method collapseStatusBar = null;
+//                    try {
+//                        // Prior to API 17, the method to call is 'collapse()'
+//                        // API 17 onwards, the method to call is `collapsePanels()`
+//                        if (Build.VERSION.SDK_INT > 16) {
+//                            collapseStatusBar = statusBarManager.getMethod("collapsePanels");
+//                        } else {
+//                            collapseStatusBar = statusBarManager.getMethod("collapse");
+//                        }
+//                    } catch (NoSuchMethodException e) {
+//                        e.printStackTrace();
+//                    }
+//
+//                    collapseStatusBar.setAccessible(true);
+//
+//                    try {
+//                        collapseStatusBar.invoke(statusBarService);
+//                    } catch (IllegalArgumentException e) {
+//                        e.printStackTrace();
+//                    } catch (IllegalAccessException e) {
+//                        e.printStackTrace();
+//                    } catch (InvocationTargetException e) {
+//                        e.printStackTrace();
+//                    }
+//                    // Currently, the delay is 10 ms. You can change this
+//                    // value to suit your needs.
+//                    collapseNotificationHandler.postDelayed(this, 10L);
+//                }
+//            }, 10L);
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+//        Toast.makeText(MainActivity.this, "Is SYSTEM APP: " + isSystemApp(this), Toast.LENGTH_SHORT).show();
+        if (isSystemApp(this) && !isStatusBarDisabled) {
+            disableStatusBar(this);
+            isStatusBarDisabled = true;
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (isStatusBarDisabled) {
+            enableStatusBar(this);
+            isStatusBarDisabled = false;
+        }
+    }
+
+    public static void disableStatusBar(Context context) {
+        Log.d(MainActivity.class.getCanonicalName(), "disableStatusBar: ");
+        // Read from property or pass it in function, whatever works for you!
+        boolean disable = true;
+        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
+
+        Class<?> statusBarManager;
+        try {
+            statusBarManager = Class.forName("android.app.StatusBarManager");
+            try {
+                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
+                disableStatusBarFeatures.setAccessible(true);
+                if (disable) {
+                    disableStatusBarFeatures.invoke(statusBarService, 0x00010000 | 0x00040000); // Disable EXPAND and NOTIFICATION_ALERTS
+                } else {
+                    disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
+                }
+            } catch (Exception e) {
+                Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
+            }
+        } catch (Exception e) {
+            Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
+        }
+    }
+
+    public static void enableStatusBar(Context context) {
+        Log.d(MainActivity.class.getCanonicalName(), "enableStatusBar: ");
+        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
+
+        Class<?> statusBarManager;
+        try {
+            statusBarManager = Class.forName("android.app.StatusBarManager");
+            try {
+                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
+                disableStatusBarFeatures.setAccessible(true);
+                disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
+            } catch (Exception e) {
+                Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
+            }
+        } catch (Exception e) {
+            Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
+        }
+    }
+
+    public boolean isSystemApp(Context context) {
+        PackageManager pm = context.getPackageManager();
+        try {
+            ApplicationInfo appInfo = pm.getApplicationInfo(context.getPackageName(), 0);
+            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 }
