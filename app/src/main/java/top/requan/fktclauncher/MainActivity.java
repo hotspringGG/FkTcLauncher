@@ -1,7 +1,6 @@
 package top.requan.fktclauncher;
 
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -14,22 +13,19 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
-import android.provider.Settings;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +37,9 @@ public class MainActivity extends AppCompatActivity {
     private static final long LONG_PRESS_DURATION = 5000; // 长按时间5秒
     private static final int TAP_COUNT_THRESHOLD = 5; // 点击次数阈值
     private static final long TAP_TIME_WINDOW = 1000; // 1秒的时间窗口
+    private static final int SWIPE_THRESHOLD = 100;
+    private static final int FLOATING_WINDOW_HEIGHT = 100;
+    private static final int SWIPE_Y_THRESHOLD = 250;
 
     private final Handler handler = new Handler();
     private boolean isLongPress = false;
@@ -52,15 +51,14 @@ public class MainActivity extends AppCompatActivity {
     //private TextView versionTextView;
     private PackageManager packageManager;
 
-    // To keep track of activity's window focus
-    private boolean currentFocus;
-
-    // To keep track of activity's foreground/background status
-    private boolean isPaused;
-
-    private Handler collapseNotificationHandler;
+    private LinearLayout floatingWindow;
 
     private boolean isStatusBarDisabled = false;
+
+    private float startX;
+    private float startY;
+    private float endX;
+    private float endY;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,6 +77,19 @@ public class MainActivity extends AppCompatActivity {
         Intent serviceIntent = new Intent(this, ScreenService.class);
         startService(serviceIntent);
 
+        while (!OverlayPermissionUtils.isOverlayPermissionGranted(this)) {
+            OverlayPermissionUtils.requestOverlayPermission(this);
+        }
+
+
+
+        OnBackPressedCallback callback = new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // 什么都不做，禁用返回键
+            }
+        };
+        getOnBackPressedDispatcher().addCallback(this, callback);
 
         packageManager = getPackageManager();
 
@@ -89,6 +100,8 @@ public class MainActivity extends AppCompatActivity {
             public boolean onTouch(View v, MotionEvent event) {
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
+                        startX = event.getX();
+                        startY = event.getY();
                         if (!isLongPressInProgress) {
                             isLongPressInProgress = true;
                             handler.postDelayed(longPressRunnable, LONG_PRESS_DURATION);
@@ -101,6 +114,21 @@ public class MainActivity extends AppCompatActivity {
                                 handleTap();
                             }
                             isLongPressInProgress = false;
+
+                            endX = event.getX();
+                            endY = event.getY();
+                            float deltaX = endX - startX;
+                            float deltaY = endY - startY;
+
+                            if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
+                                if (deltaX > 0) {
+                                    // 向右滑动
+                                    openApp("com.hsc.walk");
+                                } else if (deltaX < 0) {
+                                    // 向左滑动
+                                    openApp("com.hsc.heartrate");
+                                }
+                            }
                         }
                         break;
                 }
@@ -162,8 +190,12 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private void handleLongPress() {
-        Intent intent = new Intent(this, SettingsActivity.class);
-        startActivity(intent);
+        float deltaX = endX - startX;
+        float deltaY = endY - startY;
+        if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > SWIPE_Y_THRESHOLD) {
+            Intent intent = new Intent(this, SettingsActivity.class);
+            startActivity(intent);
+        }
         isLongPress = false; // Reset flag after handling
     }
 
@@ -196,6 +228,122 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences preferences = getSharedPreferences(SettingsActivity.PREFS_NAME, Context.MODE_PRIVATE);
         return preferences.getString(SettingsActivity.KEY_DEFAULT_LAUNCHER, null);
     }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        //blockNav();
+        if (isSystemApp(this) && !isStatusBarDisabled) {
+            disableStatusBar(this);
+            isStatusBarDisabled = true;
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        //restoreNav();
+        if (isStatusBarDisabled) {
+            enableStatusBar(this);
+            isStatusBarDisabled = false;
+        }
+    }
+
+    public static void disableStatusBar(Context context) {
+        Log.d(MainActivity.class.getCanonicalName(), "disableStatusBar: ");
+        // Read from property or pass it in function, whatever works for you!
+        boolean disable = true;
+        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
+
+        Class<?> statusBarManager;
+        try {
+            statusBarManager = Class.forName("android.app.StatusBarManager");
+            try {
+                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
+                disableStatusBarFeatures.setAccessible(true);
+                if (disable) {
+                    disableStatusBarFeatures.invoke(statusBarService, 0x00010000 | 0x00040000); // Disable EXPAND and NOTIFICATION_ALERTS
+                } else {
+                    disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
+                }
+            } catch (Exception e) {
+                Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
+            }
+        } catch (Exception e) {
+            Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
+        }
+    }
+
+    public static void enableStatusBar(Context context) {
+        Log.d(MainActivity.class.getCanonicalName(), "enableStatusBar: ");
+        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
+
+        Class<?> statusBarManager;
+        try {
+            statusBarManager = Class.forName("android.app.StatusBarManager");
+            try {
+                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
+                disableStatusBarFeatures.setAccessible(true);
+                disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
+            } catch (Exception e) {
+                Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
+            }
+        } catch (Exception e) {
+            Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
+        }
+    }
+
+    public boolean isSystemApp(Context context) {
+        PackageManager pm = context.getPackageManager();
+        try {
+            ApplicationInfo appInfo = pm.getApplicationInfo(context.getPackageName(), 0);
+            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private void openApp(String packageName) {
+        Intent intent = packageManager.getLaunchIntentForPackage(packageName);
+        if (intent != null) {
+            startActivity(intent);
+        }
+    }
+
+    @Deprecated
+    private void blockNav() {
+        Toast.makeText(MainActivity.this, "LOADING FLOATING WINDOW", Toast.LENGTH_SHORT).show();
+        WindowManager windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+
+        // 创建一个 LinearLayout 作为浮动窗口的根布局
+        floatingWindow = new LinearLayout(this);
+        floatingWindow.setBackgroundColor(0x00000000); // 半透明黑色背景
+
+        // 设置 WindowManager.LayoutParams
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, // 宽度为屏幕宽度
+                FLOATING_WINDOW_HEIGHT, // 高度为自定义的变量
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT
+        );
+
+        // 设置窗口的位置在屏幕的底部
+        params.gravity = Gravity.BOTTOM;
+
+        // 添加浮动窗口到 WindowManager
+        windowManager.addView(floatingWindow, params);
+    }
+
+    @Deprecated
+    private void restoreNav() {
+        WindowManager windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        if (windowManager != null && floatingWindow != null) {
+            windowManager.removeView(floatingWindow);
+        }
+    }
+}
 
 
 //    @Override
@@ -265,78 +413,3 @@ public class MainActivity extends AppCompatActivity {
 //            e.printStackTrace();
 //        }
 //    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-//        Toast.makeText(MainActivity.this, "Is SYSTEM APP: " + isSystemApp(this), Toast.LENGTH_SHORT).show();
-        if (isSystemApp(this) && !isStatusBarDisabled) {
-            disableStatusBar(this);
-            isStatusBarDisabled = true;
-        }
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        if (isStatusBarDisabled) {
-            enableStatusBar(this);
-            isStatusBarDisabled = false;
-        }
-    }
-
-    public static void disableStatusBar(Context context) {
-        Log.d(MainActivity.class.getCanonicalName(), "disableStatusBar: ");
-        // Read from property or pass it in function, whatever works for you!
-        boolean disable = true;
-        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
-
-        Class<?> statusBarManager;
-        try {
-            statusBarManager = Class.forName("android.app.StatusBarManager");
-            try {
-                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
-                disableStatusBarFeatures.setAccessible(true);
-                if (disable) {
-                    disableStatusBarFeatures.invoke(statusBarService, 0x00010000 | 0x00040000); // Disable EXPAND and NOTIFICATION_ALERTS
-                } else {
-                    disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
-                }
-            } catch (Exception e) {
-                Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
-            }
-        } catch (Exception e) {
-            Log.e(MainActivity.class.getCanonicalName(), "disableStatusBar: " + e.getMessage(), e);
-        }
-    }
-
-    public static void enableStatusBar(Context context) {
-        Log.d(MainActivity.class.getCanonicalName(), "enableStatusBar: ");
-        @SuppressLint("WrongConstant") Object statusBarService = context.getSystemService(Context.STATUS_BAR_SERVICE);
-
-        Class<?> statusBarManager;
-        try {
-            statusBarManager = Class.forName("android.app.StatusBarManager");
-            try {
-                final Method disableStatusBarFeatures = statusBarManager.getMethod("disable", int.class);
-                disableStatusBarFeatures.setAccessible(true);
-                disableStatusBarFeatures.invoke(statusBarService, 0x00000000); // Re-enable everything
-            } catch (Exception e) {
-                Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
-            }
-        } catch (Exception e) {
-            Log.e(MainActivity.class.getCanonicalName(), "enableStatusBar: " + e.getMessage(), e);
-        }
-    }
-
-    public boolean isSystemApp(Context context) {
-        PackageManager pm = context.getPackageManager();
-        try {
-            ApplicationInfo appInfo = pm.getApplicationInfo(context.getPackageName(), 0);
-            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        } catch (PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
-            return false;
-        }
-    }
-}
